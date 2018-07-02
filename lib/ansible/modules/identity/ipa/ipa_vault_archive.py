@@ -139,6 +139,9 @@ class VaultIPAClient(IPAClient):
     def vault_find(self, name):
         return self._post_json(method='vault_find', name=None, item={'all': True, 'cn': name})
 
+    def vaultconfig_show(self, name):
+        return self.get_json_url()
+
     def vault_archive_internal(self, name, item):
         return self._post_json(method='vault_archive_internal', name=name, item=item)
 
@@ -146,9 +149,9 @@ class VaultIPAClient(IPAClient):
         return self._post_json(method='vault_retrieve_internal', name=name, item=item)
 
 
-def get_vault_dict(vault_session_key=None, vault_data=None, vault_nonce=None, service=None):
+def vault_archive_dict(vault_session_key=None, vault_data=None, vault_nonce=None, service=None):
+    # Vault archive model
     vault = {}
-
     if vault_session_key is not None:
         vault['session_key'] = vault_session_key
     if vault_data is not None:
@@ -160,8 +163,46 @@ def get_vault_dict(vault_session_key=None, vault_data=None, vault_nonce=None, se
     return vault
 
 
-def get_vault_diff(client, ipa_vault, module_vault, module):
-    return client.get_diff(ipa_data=ipa_vault, module_data=module_vault)
+def vault_retrieve_dict(vault_session_key=None, service=None):
+    # Vault retrieve model
+    vault = {}
+
+    if vault_session_key is not None:
+        vault['session_key'] = vault_session_key
+    if service is not None:
+        vault['service'] = service
+    return vault
+
+
+def _wrap_data(self, algo, json_vault_data):
+    """Encrypt data with wrapped session key and transport cert
+    :param bytes algo: wrapping algorithm instance
+    :param bytes json_vault_data: dumped vault data
+    :return:
+    """
+    nonce = os.urandom(algo.block_size // 8)
+
+    # wrap vault_data with session key
+    padder = PKCS7(algo.block_size).padder()
+    padded_data = padder.update(json_vault_data)
+    padded_data += padder.finalize()
+
+    cipher = Cipher(algo, modes.CBC(nonce), backend=default_backend())
+    encryptor = cipher.encryptor()
+    wrapped_vault_data = encryptor.update(padded_data) + encryptor.finalize()
+
+    return nonce, wrapped_vault_data
+
+
+def generate_session_key():
+    key_length = max(algorithms.TripleDES.key_sizes)
+    algo = algorithms.TripleDES(os.urandom(key_length // 8))
+    return algo
+
+
+def crypto_reqs():
+    #transport_cert = 
+    pass
 
 
 def ensure(module, client):
@@ -169,50 +210,44 @@ def ensure(module, client):
     name = module.params['cn']
     user = module.params['username']
 
-    module_vault = get_vault_dict(vault_session_key=module.params['vault_session_key'],
+    ipa_vault = client.vault_find(name=name)
+    ipa_vault_conf = client.vaultconfig_show(name=name)
+    module.fail_json(msg=ipa_vault_conf)
+    
+
+    vault_retrieve = vault_retrieve_dict(vault_session_key=module.params['vault_session_key'],
+                                  service=module.params['service'])
+    
+    ipa_vault_data = client.vault_retrieve_internal(name, item=vault_retrieve)
+
+    vault_archive = vault_archive_dict(vault_session_key=module.params['vault_session_key'],
                                   vault_data=module.params['vault_data'],
                                   vault_nonce=module.params['vault_nonce'],
                                   service=module.params['service'])
-    ipa_vault = client.vault_find(name=name)
+
+    
 
     changed = False
     if state == 'present':
-        if not ipa_vault:
-            # New vault
+        if ipa_vault:
+            # Vault exists
             changed = True
             if not module.check_mode:
-                ipa_vault = client.vault_add_internal(name, item=module_vault)
-        else:
-            # Already exists
-            if replace:
-                diff = get_vault_diff(client, ipa_vault, module_vault, module)
-                if len(diff) > 0:
-                    changed = True
-                    if not module.check_mode:
-                        data = {}
-                        for key in diff:
-                            data[key] = module_vault.get(key)
-                        client.vault_mod_internal(name=name, item=data)
+                ipa_vault = client.vault_archive_internal(name, item=vault_archive)
 
     else:
-        if ipa_vault:
-            changed = True
-            if not module.check_mode:
-                client.vault_del(name)
+        ipa_vault = client.vault_retrieve_internal(name, item=vault_retrieve)
 
-    return changed, client.vault_find(name=name)
+    return changed, ipa_vault
 
 
 def main():
     argument_spec = ipa_argument_spec()
     argument_spec.update(cn=dict(type='str', required=True, aliases=['name']),
                          description=dict(type='str'),
-                         ipavaulttype=dict(type='str', default='symmetric',
-                                           choices=['standard', 'symmetric', 'asymmetric'], aliases=['vault_type']),
-                         ipavaultsalt=dict(type='str', aliases=['vault_salt']),
-                         ipavaultpublickey=dict(type='str', aliases=['vault_public_key']),
+                         vault_data=dict(type='str', aliases=['vault_data']),
+                         vault_session_key=dict(type='str', aliases=['vault_session_key']),
                          service=dict(type='str'),
-                         replace=dict(type='bool', default=False, choices=[True, False]),
                          state=dict(type='str', default='present', choices=['present', 'absent']),
                          username=dict(type='list', aliases=['user']))
 
@@ -227,6 +262,8 @@ def main():
     try:
         client.login(username=module.params['ipa_user'],
                      password=module.params['ipa_pass'])
+
+        module.fail_json(msg=dir(client))
         changed, vault = ensure(module, client)
         module.exit_json(changed=changed, vault=vault)
     except Exception as e:
