@@ -64,7 +64,7 @@ class IPAClient(object):
             resp, info = fetch_url(module=self.module, url=url, data=to_bytes(data), headers=headers)
             status_code = info['status']
             if status_code not in [200, 201, 204]:
-                self._fail('login', info['msg'])
+                self._fail('login', info)
 
             self.headers = {'referer': self.get_base_url(),
                             'Content-Type': 'application/json',
@@ -97,10 +97,14 @@ class IPAClient(object):
             item = {}
         url = '%s/session/json' % self.get_base_url()
         data = dict(method=method)
-        if method != 'ping':
-            data['params'] = [[name], item]
-        else:
+
+        # TODO: We should probably handle this a little better.
+        if method in ('ping', 'config_show', 'vaultconfig_show'):
             data['params'] = [[], {}]
+        elif method == 'config_mod':
+            data['params'] = [[], item]
+        else:
+            data['params'] = [[name], item]
 
         try:
             resp, info = fetch_url(module=self.module, url=url, data=to_bytes(json.dumps(data)), headers=self.headers)
@@ -121,6 +125,10 @@ class IPAClient(object):
         resp = json.loads(to_text(resp.read(), encoding=charset), encoding=charset)
         err = resp.get('error')
         if err is not None:
+            # In case of vault_retrieve, empty vault would lead to an error in
+            # the response. Need to handle this seperately.
+            if method == 'vault_retrieve_internal' and err['code'] == 4001:
+                return None
             self._fail('response %s' % method, err)
 
         if 'result' in resp:
