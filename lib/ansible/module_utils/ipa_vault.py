@@ -1,6 +1,5 @@
-#!/usr/bin/python
 # -*- coding: utf-8 -*-
-# Copyright: (c) 2018, Stefan Scheglmann <scheglmann@starto.de>
+# Copyright: (c) 2018, Stefan Scheglmann <scheglmann@strato.de>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt) # noqa: E501
 
 from __future__ import absolute_import, division, print_function
@@ -11,16 +10,22 @@ import base64
 import os
 import io
 
-from cryptography.fernet import Fernet, InvalidToken
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.padding import PKCS7
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.primitives.serialization import (
-    load_pem_public_key, load_pem_private_key)
-from cryptography import x509
+try:
+    from cryptography.fernet import Fernet, InvalidToken
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives.ciphers import (Cipher,
+                                                        algorithms, modes)
+    from cryptography.hazmat.primitives.padding import PKCS7
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    from cryptography.hazmat.primitives.serialization import (
+        load_pem_public_key, load_pem_private_key)
+    from cryptography import x509
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
+
 from ansible.module_utils.ipa import IPAClient
 
 # Set max vault data size to 1MB
@@ -29,6 +34,15 @@ MAX_VAULT_DATA_SIZE = 2**20
 
 class VaultIPAClient(IPAClient):
     """IPA Client Class overrides"""
+    def __init__(self, module, host, port, protocol):
+        self._check_lib()
+        super(VaultIPAClient, self).__init__(module, host, port, protocol)
+
+    def _check_lib(self):
+        if not HAS_CRYPTOGRAPHY:
+            self._fail("ImportError:", "This module requires the"
+                       " 'cryptography' python package")
+
     def vault_find(self):
         """Get vault information for given cn, equivalent to 'ipa vault_find'
         cli command with specified vault name."""
@@ -511,7 +525,7 @@ class VaultIPAClient(IPAClient):
         return (boolean, data): if changed and archived data"""
         if not data:
             data = self.get_n_validate_data()
-        _, vault_data = self.retrieve_data(vault)
+        dummy, vault_data = self.retrieve_data(vault)
         changed = (data is not None and data != vault_data)
         if changed:
             vault_data = self.archive_data_internal(vault, data)
@@ -618,7 +632,7 @@ class VaultIPAClient(IPAClient):
 
     def _update_vault_password(self, vault):
         """Update vault password or keys"""
-        _, data = self.retrieve_data(vault)
+        dummy, data = self.retrieve_data(vault)
         if vault.get('ipavaulttype')[0] == 'symmetric':
             item = self._create_update_item(
                 password=self._get_password(
@@ -646,7 +660,7 @@ class VaultIPAClient(IPAClient):
 
     def _update_vault_type(self, vault, new_type):
         """Change vault type"""
-        _, data = self.retrieve_data(vault)
+        dummy, data = self.retrieve_data(vault)
         item = {'ipavaulttype': new_type}
         if new_type == 'symmetric':
             item = self._create_update_item(

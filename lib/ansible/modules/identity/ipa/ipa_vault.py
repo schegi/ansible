@@ -1,22 +1,11 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
-# Copyright: (c) 2018, Juan Manuel Parrilla <jparrill@redhat.com>
+# Copyright: (c) 2018, Juan Manuel Parrilla <jparrill@redhat.com> and
+# Stefan Scheglmann <scheglmann@strato.de>
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt) # noqa: E501
 
 from __future__ import absolute_import, division, print_function
 __metaclass__ = type
-
-import traceback
-
-from ansible.module_utils.basic import AnsibleModule
-from ansible.module_utils.ipa import ipa_argument_spec
-from ansible.module_utils.ipa_vault import VaultIPAClient
-
-# only for method overwrite
-from ansible.module_utils._text import to_native
-
-# Set max vault data size to 1MB
-MAX_VAULT_DATA_SIZE = 2**20
 
 ANSIBLE_METADATA = {'metadata_version': '1.1',
                     'status': ['preview'],
@@ -173,6 +162,15 @@ vault:
   returned: always
   type: dict
 '''
+
+import traceback
+
+from ansible.module_utils.basic import AnsibleModule
+from ansible.module_utils.ipa import ipa_argument_spec
+from ansible.module_utils.ipa_vault import VaultIPAClient
+
+# only for method overwrite
+from ansible.module_utils._text import to_native
 
 
 def ensure(module, client):
